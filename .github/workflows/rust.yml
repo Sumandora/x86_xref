@@ -12,6 +12,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: "Install gcc-multilib"
+      run: sudo apt install gcc-multilib
     - name: Add 32-bit target
       run: rustup target add i686-unknown-linux-gnu
     - name: Build
