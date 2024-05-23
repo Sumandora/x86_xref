@@ -35,17 +35,17 @@ pub fn is_relative_match(
 ) -> bool {
     let mut address = address + instruction_length;
     if offset.is_negative() {
-        address -= offset.abs() as usize;
+        address -= offset.unsigned_abs();
     } else {
-        address += offset.abs() as usize;
+        address += offset.unsigned_abs();
     }
-    return address == target;
+    address == target
 }
 
 /// Verifies that an absolute offset interpretation of `value` would lead the processor to `target`
 pub fn is_absolute_match(value: usize, target: usize) -> bool {
     // Kinda redundant, but kept for completeness
-    return value == target;
+    value == target
 }
 
 #[cfg(target_pointer_width = "64")]
@@ -57,24 +57,24 @@ fn does_match_relative<Endian: ByteOrder>(
     target: usize,
 ) -> bool {
     let value = Endian::read_i32(&bytes[offset..offset + size_of::<i32>()]);
-    return is_relative_match(
+    is_relative_match(
         base_address + offset,
         instruction_length,
         value as isize,
         target,
-    );
+    )
 }
 
 #[cfg(target_pointer_width = "64")]
 fn does_match_absolute<Endian: ByteOrder>(bytes: &[u8], offset: usize, target: usize) -> bool {
     let value = Endian::read_u64(&bytes[offset..offset + size_of::<u64>()]);
-    return is_absolute_match(value as usize, target);
+    is_absolute_match(value as usize, target)
 }
 
 #[cfg(target_pointer_width = "32")]
 fn does_match_absolute<Endian: ByteOrder>(bytes: &[u8], offset: usize, target: usize) -> bool {
     let value = Endian::read_u32(&bytes[offset..offset + size_of::<u32>()]);
-    return is_absolute_match(value as usize, target);
+    is_absolute_match(value as usize, target)
 }
 
 /// Finds the first absolute reference in a `u8` slice
@@ -89,13 +89,7 @@ pub fn find_xref_abs<Endian: ByteOrder>(bytes: &[u8], target: usize) -> Option<u
         return None;
     }
 
-    for i in 0..=len - size_of::<usize>() {
-        if does_match_absolute::<Endian>(bytes, i, target) {
-            return Some(i);
-        }
-    }
-
-    return None;
+    (0..=len - size_of::<usize>()).find(|&i| does_match_absolute::<Endian>(bytes, i, target))
 }
 
 /// Finds the first relative reference in a `u8` slice
@@ -124,13 +118,7 @@ pub fn find_xref_rel<Endian: ByteOrder>(
         return None;
     }
 
-    for i in 0..=len - size_of::<i32>() {
-        if does_match_relative::<Endian>(bytes, i, base_address, instruction_length, target) {
-            return Some(i);
-        }
-    }
-
-    return None;
+    (0..=len - size_of::<i32>()).find(|&i| does_match_relative::<Endian>(bytes, i, base_address, instruction_length, target))
 }
 
 /// Finds the first reference in a `u8` slice
@@ -170,7 +158,7 @@ pub fn find_xref<Endian: ByteOrder>(
         }
     }
 
-    return None;
+    None
 }
 
 #[cfg(test)]
