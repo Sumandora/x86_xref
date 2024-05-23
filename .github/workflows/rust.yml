@@ -12,6 +12,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Add 32-bit target
+      run: rustup target add i686-unknown-linux-gnu
     - name: Build
       run: cargo build --verbose
     - name: Run tests
