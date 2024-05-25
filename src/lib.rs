@@ -27,7 +27,7 @@ use byteorder::ByteOrder;
 use core::mem::size_of;
 
 /// Verifies that an relative offset interpretation of `base_address`, `instruction_length` and `offset` would lead the processor to `target`
-pub fn is_relative_match(
+pub const fn is_relative_match(
     address: usize,
     instruction_length: usize,
     offset: isize,
@@ -43,7 +43,7 @@ pub fn is_relative_match(
 }
 
 /// Verifies that an absolute offset interpretation of `value` would lead the processor to `target`
-pub fn is_absolute_match(value: usize, target: usize) -> bool {
+pub const fn is_absolute_match(value: usize, target: usize) -> bool {
     // Kinda redundant, but kept for completeness
     value == target
 }
