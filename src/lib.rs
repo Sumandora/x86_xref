@@ -15,151 +15,48 @@
 //!
 //! # let bytes = [0x00u8];
 //! // let bytes: [u8];
-//! find_xref_abs::<NativeEndian>(&bytes, 0xDEADBEEF); // find the next absolute xref
-//! find_xref_rel::<NativeEndian>(&bytes, bytes.as_ptr() as usize, 4, 0xDEADBEEF); // find the next relative xref
-//! find_xref::<NativeEndian>(&bytes, bytes.as_ptr() as usize, 4, 0xDEADBEEF); // find the next xref
+//! AbsoluteFinder::<NativeEndian>::new(0xDEADBEEF).next(&bytes); // find the next absolute xref
+//! RelativeFinder::<NativeEndian>::new(bytes.as_ptr() as usize, 4, 0xDEADBEEF).next(&bytes); // find the next relative xref
+//! RelativeAndAbsoluteFinder::<NativeEndian>::new(bytes.as_ptr() as usize, 4, 0xDEADBEEF).next(&bytes); // find the next xref
 //! ```
 //!
 
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
-use byteorder::ByteOrder;
-use core::mem::size_of;
-
-/// Verifies that an relative offset interpretation of `base_address`, `instruction_length` and `offset` would lead the processor to `target`
-pub const fn is_relative_match(
-    address: usize,
-    instruction_length: usize,
-    offset: isize,
-    target: usize,
-) -> bool {
-    let mut address = address + instruction_length;
-    if offset.is_negative() {
-        address -= offset.unsigned_abs();
-    } else {
-        address += offset.unsigned_abs();
-    }
-    address == target
-}
-
-/// Verifies that an absolute offset interpretation of `value` would lead the processor to `target`
-pub const fn is_absolute_match(value: usize, target: usize) -> bool {
-    // Kinda redundant, but kept for completeness
-    value == target
-}
-
+pub mod absolute_finder;
 #[cfg(target_pointer_width = "64")]
-fn does_match_relative<Endian: ByteOrder>(
-    bytes: &[u8],
-    offset: usize,
-    base_address: usize,
-    instruction_length: usize,
-    target: usize,
-) -> bool {
-    let value = Endian::read_i32(&bytes[offset..offset + size_of::<i32>()]);
-    is_relative_match(
-        base_address + offset,
-        instruction_length,
-        value as isize,
-        target,
-    )
-}
-
+pub mod relative_and_absolute_finder;
 #[cfg(target_pointer_width = "64")]
-fn does_match_absolute<Endian: ByteOrder>(bytes: &[u8], offset: usize, target: usize) -> bool {
-    let value = Endian::read_u64(&bytes[offset..offset + size_of::<u64>()]);
-    is_absolute_match(value as usize, target)
-}
+pub mod relative_finder;
 
-#[cfg(target_pointer_width = "32")]
-fn does_match_absolute<Endian: ByteOrder>(bytes: &[u8], offset: usize, target: usize) -> bool {
-    let value = Endian::read_u32(&bytes[offset..offset + size_of::<u32>()]);
-    is_absolute_match(value as usize, target)
-}
+pub trait XRefFinder {
+    /// Checks if the `offset` in `bytes` is a reference
+    fn does_match(&self, bytes: &[u8], offset: usize) -> bool;
 
-/// Finds the first absolute reference in a `u8` slice
-///
-/// Arguments:
-///
-/// * `bytes`: Bytes to search through
-/// * `target`: The address, which the reference should point to
-pub fn find_xref_abs<Endian: ByteOrder>(bytes: &[u8], target: usize) -> Option<usize> {
-    let len = bytes.len();
-    if len < size_of::<usize>() {
-        return None;
+    /// Finds the next reference
+    fn next(&self, bytes: &[u8]) -> Option<usize> {
+        (0..=bytes.len()).find(|&i| self.does_match(bytes, i))
     }
 
-    (0..=len - size_of::<usize>()).find(|&i| does_match_absolute::<Endian>(bytes, i, target))
-}
-
-/// Finds the first relative reference in a `u8` slice
-///
-/// Arguments:
-///
-/// * `bytes`: Bytes to search through
-/// * `base_address`: Base address of relative references, this is useful when the memory you are scanning has been moved.
-/// * `instruction_length`: The amount of bytes to skip from the relative offset.
-///                         Most instructions, that use relative offsets end in the relative offset,
-///                         so this is the size of the relative offset type (`i32`; `size_of::<i32>` = 4)
-///                         If a instruction has the relative offset in the middle (e.g. cmp) then you need to set this to
-///                         `size_of::<i32>` + how many bytes come after the relative offset
-///                         Example: 48 83 3D [EF BE 00 00] 00    cmp $0x0, 0xBEEF(%rip) ; square brackets indicate relative offset
-///                         here there is an additonal byte after the relative offset -> `instruction_length` = `size_of::<i32>` + 1 = 5
-/// * `target`: The address, which the reference should point to
-#[cfg(target_pointer_width = "64")]
-pub fn find_xref_rel<Endian: ByteOrder>(
-    bytes: &[u8],
-    base_address: usize,
-    instruction_length: usize,
-    target: usize,
-) -> Option<usize> {
-    let len = bytes.len();
-    if len < size_of::<i32>() {
-        return None;
+    /// Finds the previous reference
+    fn prev(&self, bytes: &[u8]) -> Option<usize> {
+        (0..=bytes.len())
+            .rev()
+            .find(|&i| self.does_match(bytes, i))
+            .map(|offset| bytes.len() - offset - 1)
     }
 
-    (0..=len - size_of::<i32>()).find(|&i| does_match_relative::<Endian>(bytes, i, base_address, instruction_length, target))
-}
-
-/// Finds the first reference in a `u8` slice
-///
-/// Arguments:
-///
-/// * `bytes`: Bytes to search through
-/// * `base_address`: Base address of relative references, this is useful when the memory you are scanning has been moved.
-/// * `instruction_length`: The amount of bytes to skip from the relative offset.
-///                         Most instructions, that use relative offsets end in the relative offset,
-///                         so this is the size of the relative offset type (`i32`; `size_of::<i32>` = 4)
-///                         If a instruction has the relative offset in the middle (e.g. cmp) then you need to set this to
-///                         `size_of::<i32>` + how many bytes come after the relative offset
-///                         Example: 48 83 3D [EF BE 00 00] 00    cmp $0x0, 0xBEEF(%rip) ; square brackets indicate relative offset
-///                         here there is an additonal byte after the relative offset -> `instruction_length` = `size_of::<i32>` + 1 = 5
-/// * `target`: The address, which the reference should point to
-#[cfg(target_pointer_width = "64")]
-pub fn find_xref<Endian: ByteOrder>(
-    bytes: &[u8],
-    base_address: usize,
-    instruction_length: usize,
-    target: usize,
-) -> Option<usize> {
-    let len = bytes.len();
-
-    for i in 0..=len {
-        let remaining = len - i;
-
-        if remaining >= size_of::<i32>()
-            && does_match_relative::<Endian>(bytes, i, base_address, instruction_length, target)
-        {
-            return Some(i);
-        }
-
-        if remaining >= size_of::<u64>() && does_match_absolute::<Endian>(bytes, i, target) {
-            return Some(i);
-        }
+    // Finds all references in the `bytes` slice
+    fn all(&self, bytes: &[u8]) -> impl Iterator<Item = usize> {
+        (0..=bytes.len()).filter(|&i| self.does_match(bytes, i))
     }
-
-    None
 }
+
+pub use absolute_finder::AbsoluteFinder;
+#[cfg(target_pointer_width = "64")]
+pub use relative_and_absolute_finder::RelativeAndAbsoluteFinder;
+#[cfg(target_pointer_width = "64")]
+pub use relative_finder::RelativeFinder;
 
 #[cfg(test)]
 mod tests {
@@ -171,40 +68,43 @@ mod tests {
     #[cfg(target_pointer_width = "64")]
     fn check_find_xref() {
         let bytes = [0x00u8, 0x01, 0x23, 0x45, 0x67];
+        let searcher = RelativeAndAbsoluteFinder::<LittleEndian>::new(0, 4, 0x67452301 + 5);
 
-        assert_eq!(
-            find_xref::<LittleEndian>(&bytes, 0, 4, 0x67452301 + 5),
-            Some(1)
-        );
+        assert_eq!(searcher.next(&bytes), Some(1));
+        assert_eq!(searcher.prev(&bytes), Some(3));
+        assert_eq!(searcher.all(&bytes).collect::<Vec<_>>(), [1]);
     }
 
     #[test]
     #[cfg(target_pointer_width = "64")]
     fn check_find_xref_rel() {
         let bytes = [0x00u8, 0x01, 0x23, 0x45, 0x67];
+        let searcher = RelativeFinder::<LittleEndian>::new(0, 4, 0x67452301 + 5);
 
-        assert_eq!(
-            find_xref_rel::<LittleEndian>(&bytes, 0, 4, 0x67452301 + 5),
-            Some(1)
-        );
+        assert_eq!(searcher.next(&bytes), Some(1));
+        assert_eq!(searcher.prev(&bytes), Some(3));
+        assert_eq!(searcher.all(&bytes).collect::<Vec<_>>(), [1]);
     }
 
     #[test]
     #[cfg(target_pointer_width = "64")]
     fn check_find_xref_abs() {
         let bytes = [0x00u8, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
+        let searcher = AbsoluteFinder::<LittleEndian>::new(0xEFCDAB8967452301);
 
-        assert_eq!(
-            find_xref_abs::<LittleEndian>(&bytes, 0xEFCDAB8967452301),
-            Some(1)
-        );
+        assert_eq!(searcher.next(&bytes), Some(1));
+        assert_eq!(searcher.prev(&bytes), Some(7));
+        assert_eq!(searcher.all(&bytes).collect::<Vec<_>>(), [1]);
     }
 
     #[test]
     #[cfg(target_pointer_width = "32")]
     fn check_find_xref_abs_32_bit() {
         let bytes = [0x00u8, 0x01, 0x23, 0x45, 0x67];
+        let searcher = AbsoluteFinder::<LittleEndian>::new(0x67452301);
 
-        assert_eq!(find_xref_abs::<LittleEndian>(&bytes, 0x67452301), Some(1));
+        assert_eq!(searcher.next(&bytes), Some(1));
+        assert_eq!(searcher.prev(&bytes), Some(3));
+        assert_eq!(searcher.all(&bytes).collect::<Vec<_>>(), [1]);
     }
 }
